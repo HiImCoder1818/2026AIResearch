@@ -1,0 +1,15 @@
+# Reinforcement Learning
+stable-baselines3>=2.7.0
+gymnasium[mujoco]>=1.2.0
+
+# MuJoCo
+mujoco>=3.3.0
+
+# Scientific Python
+numpy>=1.26
+scipy>=1.13
+
+# Utilities
+matplotlib
+imageio
+imageio-ffmpeg
