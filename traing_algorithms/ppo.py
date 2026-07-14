@@ -43,6 +43,8 @@ class Args:
     # Logging
     model_path: str = ""
     csv_path: str = ""
+    eval_freq: int = 2016
+    eval_timesteps: int = 100
 
 class Environment:
   def __init__(self, args, env_kwargs):
@@ -132,7 +134,7 @@ class Model:
 
     self.buffer = self.model.rollout_buffer
     self.episode_starts = np.ones(args.n_envs)
-    self.total_rewards = np.zeros(args.n_envs)
+    self.total_rewards = np.zeros(self.args.n_envs)
     self.timesteps = 0
     self.max_reward = float("-inf")
 
@@ -168,11 +170,29 @@ class Model:
     self.buffer.add(obs, action, reward, self.episode_starts, value, log_prob)
     self.total_rewards += reward
 
-  def update(self, done, next_obs, verbose=True):
-    self.timesteps += self.args.n_envs
+  def evaluate(self):
+    total_rewards = np.zeros(self.args.n_envs)
 
-    if done.any():
-        finished_rewards = self.total_rewards[done]
+    obs = self.env.new_episode()
+    for _ in range(self.args.eval_timesteps):
+        action, _, _ = self.take_action(obs)
+        obs, rewards, _, _ = self.env.step(action)
+        total_rewards += rewards
+
+    return total_rewards
+
+  def update(self, done, next_obs, verbose=True, eval_reward=True):
+    self.timesteps += self.args.n_envs
+    
+    eval_condition = self.timesteps%self.args.eval_freq == 0 and eval_reward
+    train_condition = done.any() and not eval_reward
+
+    if eval_condition or train_condition:
+        if eval_reward:
+          finished_rewards = self.evaluate()
+        else:
+          finished_rewards = self.total_rewards.copy()
+
         avg_reward = finished_rewards.mean()
 
         self.metrics["timestep"].append(self.timesteps)
@@ -181,15 +201,15 @@ class Model:
         if self.max_reward < avg_reward:
             if verbose:
                 print(f"New Best Reward: {avg_reward:.2f} Saving Model...")
-            self.model.save(self.args.model_path + "checkpointBest.pt")
+            self.model.save(self.args.model_path)
             self.max_reward = avg_reward
 
         if verbose:
             print(f"Timestep: {self.timesteps} | Reward: {avg_reward}")
 
-        pd.DataFrame(self.metrics).to_csv(self.args.csv_path, index=False)
-
         self.total_rewards[done] = 0.0
+
+        pd.DataFrame(self.metrics).to_csv(self.args.csv_path, index=False)
 
     if self.buffer.full:
       with torch.no_grad():

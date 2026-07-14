@@ -34,19 +34,19 @@ class Policy(nn.Module):
     def forward_critic(self, features):
         return self.value_net(features)
 
-def main():
+def main(has_saves=False):
     LATENT_SPACE = 50
     HORIZON = 100
 
     args = Args()
-    args.model_path = "/content/drive/MyDrive/2026 AI Research/Code & Data/task/"
-    args.csv_path = "/content/drive/MyDrive/2026 AI Research/Code & Data/task/"
-    args.device = "cpu"
+    args.model_path = f"data/models/checkpointMeta.pt"
+    args.csv_path = f"data/training_curves/dataMeta.csv"
+    args.device = "cuda"
     args.action_shape = LATENT_SPACE
 
     args.env_name = "Ant-v5"
-    args.n_envs = 8
-    args.total_timesteps = 5_000_000
+    args.n_envs = 24
+    args.total_timesteps = 50_000_000
 
     args.batch_size = 256
     args.n_epochs = 50
@@ -59,19 +59,21 @@ def main():
     args.ent_coef = 0.001
 
     env = Environment(args, dict(
-    terminate_when_unhealthy=False,
-    forward_reward_weight=25,
-    ctrl_cost_weight=0.3,
+        terminate_when_unhealthy=False,
+        forward_reward_weight=25,
+        ctrl_cost_weight=0.3,
     ))
+
     meta_controller = Model(env, Policy, args)
-    # meta_controller.load(args.model_path + "checkpointBest.pt")
-    # meta_controller.load_metrics(args.csv_path + "data.csv")
-    skills_model = SAC.load("checkpointFinal.pt", device=args.device)
+    if has_saves:
+        meta_controller.load(args.model_path)
+        meta_controller.load_metrics(args.csv_path + "data.csv")
+
+    skills_model = SAC.load("data/models/skillsModel.pt", device=args.device)
 
     obs = env.new_episode()
 
-    meta_controller.timesteps = 0
-
+    print(args.total_timesteps/HORIZON)
     while meta_controller.timesteps <= args.total_timesteps/HORIZON:
         option_reward = 0
 
@@ -93,7 +95,7 @@ def main():
 
             # print(done)
             meta_controller.collect_rollout(obs_start, skill_idx, option_reward/HORIZON, value.cpu(), log_prob.cpu())
-            obs = meta_controller.update(done, obs, verbose=True)
+            obs = meta_controller.update(done, obs, verbose=True, eval_reward=False)
 
 if __name__ == '__main__':
     main()

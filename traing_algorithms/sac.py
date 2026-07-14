@@ -51,6 +51,8 @@ class Args:
     # Logging
     model_path: str = ""
     csv_path: str = ""
+    eval_freq: int = 2016
+    eval_timesteps: int = 100
 
 class Environment:
   def __init__(self, args, env_kwargs):
@@ -132,9 +134,8 @@ class Model:
 
     self.args = args
     self.timesteps = 0
-    self.end_eps_time = np.zeros(args.n_envs)
-    self.total_rewards = np.zeros(args.n_envs)
     self.max_reward = float("-inf")
+    self.total_rewards = np.zeros(self.args.n_envs)
     self.metrics = {
         "reward": [],
         "timestep": [],
@@ -156,11 +157,27 @@ class Model:
         )
     )
 
+  def load_metrics(self, file):
+    df = pd.read_csv(file)
+    for row in df:
+      self.metrics[row] = list(df[row])
+
   def collect_rollout(self, obs, next_obs, action, reward, done, info):
     self.model.replay_buffer.add(obs, next_obs, action, reward, done, info)
     self.total_rewards += reward
 
-  def update(self, done, next_obs, verbose=True, save=True):
+  def evaluate(self):
+    total_rewards = np.zeros(self.args.n_envs)
+
+    obs = self.env.new_episode()
+    for _ in range(self.args.eval_timesteps):
+        action = self.take_action(obs)
+        obs, rewards, _, _ = self.env.step(action)
+        total_rewards += rewards
+
+    return total_rewards
+
+  def update(self, done, next_obs, verbose=True, save=True, eval_reward=True):
     updating = False
     new_best = False
     if self.timesteps > self.model.learning_starts and self.timesteps % self.args.train_freq == 0:
@@ -171,35 +188,39 @@ class Model:
       updating = True
 
     self.timesteps += self.args.n_envs
-    self.end_eps_time += 1
 
-    if done.any():
-        total_rewards_copy = self.total_rewards.copy()
-        finished_rewards = self.total_rewards[done]
-        episode_reward = finished_rewards.mean()
+    eval_condition = self.timesteps%self.args.eval_freq == 0 and eval_reward
+    train_condition = done.any() and not eval_reward
 
-        if self.max_reward < episode_reward:
+    if eval_condition or train_condition:
+        if eval_reward:
+          finished_rewards = self.evaluate()
+        else:
+          finished_rewards = self.total_rewards.copy()
+
+        avg_reward = finished_rewards.mean()
+
+        if self.max_reward < avg_reward:
           new_best = True
           if verbose:
             print("New Best Reward, Saving Model")
 
           self.model.save(self.args.model_path)
-          self.max_reward = episode_reward
+          self.max_reward = avg_reward
 
         obs = self.env.new_episode()
 
-        self.metrics["reward"].append(episode_reward)
+        self.metrics["reward"].append(avg_reward)
         self.metrics["timestep"].append(self.timesteps)
 
         if verbose:
-          print(f"Timestep: {self.timesteps} | Reward: {episode_reward}")
+          print(f"Timestep: {self.timesteps} | Reward: {avg_reward}")
 
         if save:
           pd.DataFrame(self.metrics).to_csv(self.args.csv_path, index=False)
 
-        self.total_rewards[done] = 0
-        self.end_eps_time[done] = 0
+        self.total_rewards[done] = 0.0
 
-        return obs, updating, new_best, total_rewards_copy
+        return obs, updating, new_best, finished_rewards
 
     return next_obs, updating, new_best, None

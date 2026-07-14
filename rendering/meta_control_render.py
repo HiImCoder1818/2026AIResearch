@@ -1,3 +1,4 @@
+from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3 import SAC, PPO
 import gymnasium as gym
 import numpy as np
@@ -11,10 +12,20 @@ os.environ["MUJOCO_GL"] = "egl"
 LATENT_SPACE = 50
 HORIZON = 100
 
-env = gym.make("Ant-v5")
+env = gym.make("Ant-v5", render_mode="rgb_array")
 
-meta_controller = PPO.load("checkpointBest.pt", device="cuda")
-skills_model = SAC.load("checkpointFinal.pt", device="cuda")
+custom_objects = {
+    "policy_class": ActorCriticPolicy,
+    "policy_kwargs": dict(net_arch=dict(pi=[1024, 1024], vf=[1024, 1024])),
+    "lr_schedule": lambda _: 0.0,
+}
+
+meta_controller = PPO.load(
+    "data/models/checkpointMeta.pt",
+    device="cuda",
+    custom_objects=custom_objects,
+)
+skills_model = SAC.load("data/models/skillsModel.pt", device="cuda")
 
 obs, _ = env.reset()
 frames = []
